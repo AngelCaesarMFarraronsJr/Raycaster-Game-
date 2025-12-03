@@ -5,7 +5,6 @@
 #include <time.h> 
 // NOTE: This program requires the following PPM files to be present 
 // in a 'Textures' subdirectory relative to the executable:
-// T_1.ppm, T_2.ppm, T_3.ppm, T_4.ppm, start.ppm, win.ppm, intro.ppm, key.ppm
 #include "Textures/T_1.ppm"
 #include "Textures/T_2.ppm"
 #include "Textures/T_3.ppm"
@@ -146,7 +145,7 @@ void drawWinScreen()
     }
 }
 
-// --- MAP & COLLISION ---
+// MAP & COLLISION
 
 int mapX=16, mapY=16, mapS=64; // Map size and cell size
 int map[]=
@@ -165,7 +164,7 @@ int map[]=
     1,0,1,0,1,0,0,0,0,1,0,0,0,1,0,1,
     1,0,1,0,0,0,0,0,0,1,0,1,1,1,0,1,
     1,1,1,0,1,1,1,0,1,1,0,0,0,1,0,1,
-    1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,4, // Exit door (4)
+    1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,4, // Exit door
     1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
 };
 
@@ -432,16 +431,16 @@ void drawRays3D()
             if(mp >= 0 && mp < mapX*mapY) {
                 // If the ray hits a wall (1) OR a door (4), record the hit.
                 if(map[mp] == 1 || map[mp] == 4) { 
-                    vx = rx; vy = ry; disV = dist(px,py,vx,vy); // NOTE: Fixed typo: vy was 'vy' in original code, assumed 'ry' was intended based on assignment before loop
+                    vx = rx; vy = ry; disV = dist(px,py,vx,vy);
                     vMapValue = map[mp]; // Store map value
                     dof = 8; 
-                } else { // Ray passes through open space
+                } else { 
                     rx += xo; ry += yo; dof++; 
                 }
-            } else { rx += xo; ry += yo; dof++; } // Out of map bounds
+            } else { rx += xo; ry += yo; dof++; } 
         }
 
-        // --- Final Distance Selection & Fish-eye Correction ---
+        // Fish-eye Correction
         if(disV < disH) { rx = vx; ry = vy; disT = disV; wallType = vMapValue; shade = 1.0f; }
         else { rx = hx; ry = hy; disT = disH; wallType = hMapValue; shade = 0.7f; }
 
@@ -983,3 +982,4 @@ int main(int argc, char* argv[])
     glutMainLoop();
     return 0;
 }
+
