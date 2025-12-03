@@ -2,12 +2,14 @@
 #include <stdlib.h>
 #include <GL/glut.h>
 #include <math.h>
+#include <time.h> // Added for time-based seeding of random number generator
 #include "Textures/T_1.ppm"
 #include "Textures/T_2.ppm"
 #include "Textures/T_3.ppm"
 #include "Textures/T_4.ppm"
 #include "Textures/start.ppm"
 #include "Textures/win.ppm"
+#include "Textures/intro.ppm"
 #include "Textures/key.ppm"
 #define PI 3.1415926535
 #define P2 PI/2
@@ -20,6 +22,8 @@ int keyStates[256] = {0};
 int gameStarted = 0;
 int gameWon = 0;
 int hasKey = 0;
+int gameIntro = 0;
+int playerPassedExitCheck = 0;
 
 float depthBuffer[1024];
 
@@ -39,6 +43,12 @@ float dist(float ax, float ay, float bx, float by)
     return sqrtf((bx-ax)*(bx-ax) + (by-ay)*(by-ay));
 }
 
+// Helper macro for magenta pixel filter (R=255, G=0, B=255)
+#define CHECK_MAGENTA_PIXEL(r, g, b) (r == 255 && g == 0 && b == 255)
+// Original check for white, used for textures that might use it for transparency
+#define CHECK_WHITE_PIXEL(r, g, b) (r == 255 && g == 255 && b == 255)
+
+
 void drawStartScreen()
 {
     int x, y;
@@ -54,11 +64,43 @@ void drawStartScreen()
                 int green = start[pixel+1];
                 int blue  = start[pixel+2];
                 
-                glPointSize(1);
-                glColor3ub((GLubyte)red, (GLubyte)green, (GLubyte)blue);
-                glBegin(GL_POINTS);
-                glVertex2i(x, y);
-                glEnd();
+                // Keep the white filter for other screens if needed
+                if(!CHECK_WHITE_PIXEL(red, green, blue)) 
+                {
+                    glPointSize(1);
+                    glColor3ub((GLubyte)red, (GLubyte)green, (GLubyte)blue);
+                    glBegin(GL_POINTS);
+                    glVertex2i(x, y);
+                    glEnd();
+                }
+            }
+        }
+    }
+}
+
+void drawIntroScreen()
+{
+    int x, y;
+    for(y=0; y<512; y++)
+    {
+        for(x=0; x<1024; x++)
+        {
+            int pixel = (y * 1024 + x) * 3;
+            
+            if(pixel >= 0 && pixel < 1024*512*3 - 2)
+            {
+                int red   = intro[pixel+0];
+                int green = intro[pixel+1];
+                int blue  = intro[pixel+2];
+                
+                if(!CHECK_WHITE_PIXEL(red, green, blue)) // --- FILTER ---
+                {
+                    glPointSize(1);
+                    glColor3ub((GLubyte)red, (GLubyte)green, (GLubyte)blue);
+                    glBegin(GL_POINTS);
+                    glVertex2i(x, y);
+                    glEnd();
+                }
             }
         }
     }
@@ -79,21 +121,27 @@ void drawWinScreen()
                 int green = win[pixel+1];
                 int blue  = win[pixel+2];
                 
-                glPointSize(1);
-                glColor3ub((GLubyte)red, (GLubyte)green, (GLubyte)blue);
-                glBegin(GL_POINTS);
-                glVertex2i(x, y);
-                glEnd();
+                if(!CHECK_WHITE_PIXEL(red, green, blue)) // --- FILTER ---
+                {
+                    glPointSize(1);
+                    glColor3ub((GLubyte)red, (GLubyte)green, (GLubyte)blue);
+                    glBegin(GL_POINTS);
+                    glVertex2i(x, y);
+                    glEnd();
+                }
             }
         }
     }
 }
 
+
+// --- MAP & COLLISION ---
+
 int mapX=16, mapY=16, mapS=64;
 int map[]=
 {
     1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-    4,0,0,0,0,1,0,0,0,0,0,1,0,0,0,1,
+    1,0,0,0,0,1,0,0,0,0,0,1,0,0,0,1,
     1,0,1,0,0,1,0,1,1,1,0,1,0,1,0,1,
     1,0,1,0,0,0,0,1,0,0,0,0,0,1,0,1,
     1,0,1,1,1,1,0,1,0,1,1,1,1,1,0,1,
@@ -106,8 +154,8 @@ int map[]=
     1,0,1,0,1,0,0,0,0,1,0,0,0,1,0,1,
     1,0,1,0,0,0,0,0,0,1,0,1,1,1,0,1,
     1,1,1,0,1,1,1,0,1,1,0,0,0,1,0,1,
-    1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,
-    1,1,1,1,1,1,1,4,1,1,1,1,1,1,1,1,
+    1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,4,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
 };
 
 int mapFloor[]=
@@ -150,6 +198,34 @@ int mapCeiling[]=
     3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
 };
 
+/**
+ * Finds a random cell on the map that is walkable (map value 0)
+ * and returns the center coordinates.
+ * This is crucial for dynamic key placement.
+ */
+void findRandomEmptySpot(float *outX, float *outY) {
+    int rx, ry, mp;
+    int found = 0;
+    while (!found) {
+        // Generate random coordinates within the map bounds (1 to mapX-2, 1 to mapY-2)
+        // to avoid corners and border walls (which are always 1).
+        rx = (rand() % (mapX - 2)) + 1;
+        ry = (rand() % (mapY - 2)) + 1;
+        
+        mp = ry * mapX + rx;
+        
+        // Check if the cell is walkable (value 0)
+        // Ensure the player doesn't spawn on the key location either, 
+        // which is done implicitly by checking for 0 (player start is in map[1][1]).
+        if (map[mp] == 0) {
+            *outX = rx * mapS + mapS / 2.0f;
+            *outY = ry * mapS + mapS / 2.0f;
+            found = 1;
+        }
+    }
+}
+
+
 int checkCollision(float x, float y)
 {
     int mx = (int)(x) >> 6;
@@ -157,13 +233,21 @@ int checkCollision(float x, float y)
     int mp = my * mapX + mx;
 
     if(mp < 0 || mp >= mapX * mapY) return 1;
+
     if(map[mp] == 1) return 1;
+    
+    // Door (4) logic modified to set playerPassedExitCheck
     if(map[mp] == 4) {
-        gameWon = 1;
-        return 1;
+        if(hasKey) {
+            // Player has key and hits the exit door.
+            playerPassedExitCheck = 1; 
+            return 0; // Allowed to pass through
+        } else {
+            return 1; // Blocked
+        }
     }
 
-    return 0;
+    return 0; // Open space (0)
 }
 
 void drawMinimap()
@@ -180,7 +264,11 @@ void drawMinimap()
             if(map[mp] == 1) {
                 glColor3f(1, 1, 1);
             } else if(map[mp] == 4) {
-                glColor3f(1, 1, 0);
+                if(hasKey) {
+                    glColor3f(0.0f, 1.0f, 0.0f); // Green for unlocked on minimap
+                } else {
+                    glColor3f(1.0f, 0.0f, 0.0f); // Red for locked on minimap
+                }
             } else {
                 glColor3f(0, 0, 0);
             }
@@ -196,10 +284,11 @@ void drawMinimap()
     
     if(keySprite.active)
     {
-        int keyMinimapX = (keySprite.x * minimapScale) / mapS;
-        int keyMinimapY = (keySprite.y * minimapScale) / mapS;
+        // Calculate key position in minimap coordinates
+        int keyMinimapX = (int)(keySprite.x * minimapScale) / mapS;
+        int keyMinimapY = (int)(keySprite.y * minimapScale) / mapS;
         
-        glColor3f(1, 0.84, 0);
+        glColor3f(1, 0.84, 0); // Gold color for the key
         glPointSize(6);
         glBegin(GL_POINTS);
         glVertex2i(keyMinimapX, keyMinimapY);
@@ -207,8 +296,8 @@ void drawMinimap()
     }
     
     {
-        int playerMinimapX = (px * minimapScale) / mapS;
-        int playerMinimapY = (py * minimapScale) / mapS;
+        int playerMinimapX = (int)(px * minimapScale) / mapS;
+        int playerMinimapY = (int)(py * minimapScale) / mapS;
         
         glColor3f(1, 0, 0);
         glPointSize(4);
@@ -226,6 +315,7 @@ void drawMinimap()
     }
 }
 
+// --- RAYCASTING & RENDERING ---
 void drawRays3D()
 {
     int r,mx,my,mp,dof,y,i;
@@ -249,7 +339,8 @@ void drawRays3D()
         float shade;
         int texX;
         int wallType;
-        
+
+        // Horizontal Check
         dof=0;
         disH=1e6f;
         hx=0;
@@ -263,14 +354,19 @@ void drawRays3D()
         while(dof < 8)
         {
             mx = (int)(rx) >> 6; my = (int)(ry) >> 6; mp = my * mapX + mx;
-            if(mp >= 0 && mp < mapX*mapY && (map[mp] == 1 || map[mp] == 4)) { 
-                hx = rx; hy = ry; disH = dist(px,py,hx,hy); 
-                hMapValue = map[mp];
-                dof = 8; 
-            }
-            else { rx += xo; ry += yo; dof++; }
+            if(mp >= 0 && mp < mapX*mapY) {
+                // If the ray hits a wall (1) OR a door (4), it stops and records the hit.
+                if(map[mp] == 1 || map[mp] == 4) { 
+                    hx = rx; hy = ry; disH = dist(px,py,hx,hy); 
+                    hMapValue = map[mp];
+                    dof = 8; 
+                } else { // Ray passes through empty space (0)
+                    rx += xo; ry += yo; dof++; 
+                }
+            } else { rx += xo; ry += yo; dof++; }
         }
 
+        // Vertical Check
         dof = 0;
         disV = 1e6f;
         vx = px;
@@ -280,20 +376,25 @@ void drawRays3D()
 
         if(ra > P2 && ra < P3) { rx = (((int)px>>6)<<6) - 0.0001f; ry = (px - rx) * nTan + py; xo = -64; yo = -xo * nTan; }
         else { rx = (((int)px>>6)<<6) + 64; ry = (px - rx) * nTan + py; xo = 64; yo = -xo * nTan; }
-        if(fabsf(ra - 0.0f) < 1e-6 || fabsf(ra - PI) < 1e-6) { rx = px; ry = py; dof = 8; }
+        if(fabsf(ra - P2) < 1e-6 || fabsf(ra - P3) < 1e-6) { rx = px; ry = py; dof = 8; }
         while(dof < 8)
         {
             mx = (int)(rx) >> 6; my = (int)(ry) >> 6; mp = my * mapX + mx;
-            if(mp >= 0 && mp < mapX*mapY && (map[mp] == 1 || map[mp] == 4)) { 
-                vx = rx; vy = ry; disV = dist(px,py,vx,vy); 
-                vMapValue = map[mp];
-                dof = 8; 
-            }
-            else { rx += xo; ry += yo; dof++; }
+            if(mp >= 0 && mp < mapX*mapY) {
+                 // If the ray hits a wall (1) OR a door (4), it stops and records the hit.
+                if(map[mp] == 1 || map[mp] == 4) { 
+                    vx = rx; vy = ry; disV = dist(px,py,vx,vy); 
+                    vMapValue = map[mp];
+                    dof = 8; 
+                } else { // Ray passes through empty space (0)
+                    rx += xo; ry += yo; dof++; 
+                }
+            } else { rx += xo; ry += yo; dof++; }
         }
 
-        if(disV < disH) { rx = vx; ry = vy; disT = disV; }
-        else { rx = hx; ry = hy; disT = disH; }
+        // Select the closest hit. wallType will be 4 if it hit the door.
+        if(disV < disH) { rx = vx; ry = vy; disT = disV; wallType = vMapValue; shade = 1.0f; }
+        else { rx = hx; ry = hy; disT = disH; wallType = hMapValue; shade = 0.7f; }
 
         ca = pa - ra;
         if(ca < 0) ca += 2*PI;
@@ -308,6 +409,7 @@ void drawRays3D()
         if(lineH > 512) lineH = 512;
         lineOff = 256.0f - lineH/2.0f;
 
+        // Draw Ceiling (T_3)
         for(y = 0; y < (int)lineOff; y++)
         {
             float dy = 256.0f - y;
@@ -319,10 +421,12 @@ void drawRays3D()
             
             if(fabsf(dy) < 1e-6f) continue;
             
-            ceilingDist = (mapS * 512.0f) / (dy * 2.0f);
+            float currentRa = ra;
+            float caFix = cosf(pa - currentRa); 
+            ceilingDist = (mapS * 512.0f) / (dy * 2.0f * caFix);
             
-            wx = px + cosf(ra) * ceilingDist;
-            wy = py + sinf(ra) * ceilingDist;
+            wx = px + cosf(currentRa) * ceilingDist;
+            wy = py + sinf(currentRa) * ceilingDist;
             
             localX = ((int)wx) % 32;
             localY = ((int)wy) % 32;
@@ -347,7 +451,9 @@ void drawRays3D()
                 glEnd();
             }
         }
+        // End Draw Ceiling
 
+        // Wall Texture Calculation
         if(disV < disH) {
             texX = ((int)ry) % 32;
             if(texX < 0) texX += 32;
@@ -357,15 +463,8 @@ void drawRays3D()
             if(texX < 0) texX += 32;
             shade = 0.7f;
         }
-
-        mx = (int)(rx) >> 6; 
-        my = (int)(ry) >> 6; 
-        mp = my * mapX + mx;
-        wallType = 1;
-        if(mp >= 0 && mp < mapX*mapY) {
-            wallType = map[mp];
-        }
-
+        
+        // Draw Wall
         for(y = 0; y < (int)lineH; y++)
         {
             int texY = (y * 32) / (int)lineH;
@@ -381,10 +480,12 @@ void drawRays3D()
             if(pixel >= 0 && pixel < 32*32*3 - 2)
             {
                 if(wallType == 4) {
+                    // Door always draws T_4 regardless of key
                     red   = (int)(T_4[pixel+0] * shade);
                     green = (int)(T_4[pixel+1] * shade);
                     blue  = (int)(T_4[pixel+2] * shade);
                 } else {
+                    // Regular Wall (T_1)
                     red   = (int)(T_1[pixel+0] * shade);
                     green = (int)(T_1[pixel+1] * shade);
                     blue  = (int)(T_1[pixel+2] * shade);
@@ -398,10 +499,10 @@ void drawRays3D()
             }
         }
 
+        // Draw Floor (T_2)
         for(y = (int)(lineH + lineOff); y < 512; y++)
         {
             float dy = y - 256.0f;
-            float raFix;
             float floorDist;
             float wx, wy;
             int localX, localY;
@@ -410,11 +511,12 @@ void drawRays3D()
             
             if(fabsf(dy) < 1e-6f) continue;
             
-            raFix = cosf(pa - ra);
-            floorDist = (mapS * 512.0f) / (dy * 2.0f);
+            float currentRa = ra;
+            float caFix = cosf(pa - currentRa);
+            floorDist = (mapS * 512.0f) / (dy * 2.0f * caFix);
             
-            wx = px + cosf(ra) * floorDist;
-            wy = py + sinf(ra) * floorDist;
+            wx = px + cosf(currentRa) * floorDist;
+            wy = py + sinf(currentRa) * floorDist;
             
             localX = ((int)wx) % 32;
             localY = ((int)wy) % 32;
@@ -439,6 +541,7 @@ void drawRays3D()
                 glEnd();
             }
         }
+        // End Draw Floor
 
         ra += DR*0.5f;
         if(ra < 0) ra += 2*PI;
@@ -475,7 +578,8 @@ void drawSprite(Sprite *s, const unsigned char *tex, int texWidth, int texHeight
     spriteHeight = (mapS * 512.0f) / spriteDist;
     if(spriteHeight > 512) spriteHeight = 512;
     
-    spriteWidth = spriteHeight;
+    // Maintain square aspect ratio
+    spriteWidth = spriteHeight; 
     
     spriteScreenX = (int)(512 + (spriteAngle * 512 / (DR * 30.0f)));
     
@@ -489,37 +593,49 @@ void drawSprite(Sprite *s, const unsigned char *tex, int texWidth, int texHeight
     if(startY < 0) startY = 0;
     if(endY > 512) endY = 512;
     
+    // Draw key shape
     for(x = startX; x < endX; x++)
     {
         if(x < 0 || x >= 1024) continue;
         
-        // Fixed depth buffer check - compare with the correct buffer index
+        // Depth check: Only draw the sprite if it is closer than the wall behind it
         if(x >= 0 && x < 1024 && spriteDist >= depthBuffer[x]) continue;
         
         for(y = startY; y < endY; y++)
         {
-            int texX = ((x - startX) * texWidth) / (int)spriteWidth;
-            int texY = ((y - startY) * texHeight) / (int)spriteHeight;
+            // Normalize coordinates to 0-1 range
+            float nx = (float)(x - startX) / spriteWidth;
+            float ny = (float)(y - startY) / spriteHeight;
             
-            if(texX >= 0 && texX < texWidth && texY >= 0 && texY < texHeight)
+            int drawPixel = 0;
+            
+            // Key head
+            float headCenterY = 0.25f;
+            float headRadius = 0.15f;
+            float distToHead = sqrtf((nx - 0.5f)*(nx - 0.5f) + (ny - headCenterY)*(ny - headCenterY));
+            if(distToHead < headRadius) drawPixel = 1;
+            
+            // Key hole)
+            float holeCenterY = 0.25f;
+            float holeRadius = 0.06f;
+            float distToHole = sqrtf((nx - 0.5f)*(nx - 0.5f) + (ny - holeCenterY)*(ny - holeCenterY));
+            if(distToHole < holeRadius) drawPixel = 0;
+            
+            // Key shaft 
+            if(nx > 0.43f && nx < 0.57f && ny > 0.35f && ny < 0.75f) drawPixel = 1;
+            
+            // Key teeth
+            if(nx > 0.43f && nx < 0.50f && ny > 0.70f && ny < 0.78f) drawPixel = 1;
+            if(nx > 0.43f && nx < 0.50f && ny > 0.82f && ny < 0.90f) drawPixel = 1;
+            
+            if(drawPixel)
             {
-                int pixel = (texY * texWidth + texX) * 3;
-                
-                if(pixel >= 0 && pixel < texWidth * texHeight * 3 - 2)
-                {
-                    int red = tex[pixel+0];
-                    int green = tex[pixel+1];
-                    int blue = tex[pixel+2];
-                    
-                    // Skip transparent pixels (white background)
-                    if(red > 250 && green > 250 && blue > 250) continue;
-                    
-                    glColor3ub((GLubyte)red, (GLubyte)green, (GLubyte)blue);
-                    glPointSize(1);
-                    glBegin(GL_POINTS);
-                    glVertex2i(x, y);
-                    glEnd();
-                }
+                // Color
+                glColor3f(1.0f, 0.84f, 0.0f);
+                glPointSize(1);
+                glBegin(GL_POINTS);
+                glVertex2i(x, y);
+                glEnd();
             }
         }
     }
@@ -532,7 +648,8 @@ void updateMovement()
     float newX, newY;
     int moved = 0;
     
-    if(!gameStarted) return;
+    // Only update movement if the game is actively running (not intro, not win, not start)
+    if(!gameStarted || gameWon || gameIntro) return;
     
     newX = px;
     newY = py;
@@ -579,7 +696,13 @@ void updateMovement()
         }
     }
 
-    if(moved) {
+    // Check if the player passed the exit check after moving
+    if(playerPassedExitCheck)
+    {
+        gameWon = 1; // Immediately transition to win screen
+    }
+    
+    if(moved || gameWon) {
         glutPostRedisplay();
     }
 }
@@ -596,8 +719,14 @@ void display()
     {
         drawStartScreen();
     }
-    else
+    else if(gameIntro)
     {
+        drawIntroScreen();
+    }
+    // All escape/find screens removed, fall through to main game loop
+    else // Main game loop (Maze + Minimap + Key/No Key Sprite)
+    {
+        // Draw the background color for the game area
         glColor3f(0.2f, 0.2f, 0.2f);
         glBegin(GL_QUADS);
         glVertex2i(0, 0);
@@ -607,7 +736,7 @@ void display()
         glEnd();
         
         drawRays3D();
-        drawSprite(&keySprite, (const unsigned char*)key, 32, 32);
+        drawSprite(&keySprite, NULL, 32, 32);
         drawMinimap();
     }
     
@@ -618,29 +747,45 @@ void keyDown(unsigned char key, int x, int y)
 {
     if(gameWon)
     {
+        // Reset game state
         gameWon = 0;
         gameStarted = 0;
+        gameIntro = 0;
         hasKey = 0;
+        playerPassedExitCheck = 0;
+        
+        // Reset player position
         px = 1 * mapS + mapS/2;
         py = 1 * mapS + mapS/2;
         pa = 0;
         pdx = cosf(pa) * 5.0f;
         pdy = sinf(pa) * 5.0f;
-        keySprite.x = 7.5 * mapS;
-        keySprite.y = 7.5 * mapS;
+        
+        // Reset key position randomly
+        float keyX, keyY;
+        findRandomEmptySpot(&keyX, &keyY);
+        keySprite.x = keyX;
+        keySprite.y = keyY;
         keySprite.active = 1;
+        
         glutPostRedisplay();
         return;
     }
     
     if(!gameStarted)
     {
+        // Transition from Start Screen to Intro Screen
         gameStarted = 1;
+        gameIntro = 1; // Set intro state active
         glutPostRedisplay();
-        // Don't return here - let the key state be set below
+    }
+    else if(gameIntro)
+    {
+        // Transition from Intro Screen directly to Game
+        gameIntro = 0; // Set intro state inactive, entering main game loop
+        glutPostRedisplay();
     }
     
-    // Always set key state (removed the early return above)
     keyStates[key] = 1;
 }
 
@@ -677,13 +822,22 @@ void init()
     pdx = cosf(pa) * 5.0f;
     pdy = sinf(pa) * 5.0f;
     
-    keySprite.x = 7.5 * mapS;
-    keySprite.y = 7.5 * mapS;
+    // Use the new function to place the key randomly
+    float keyX, keyY;
+    findRandomEmptySpot(&keyX, &keyY);
+    
+    keySprite.x = keyX;
+    keySprite.y = keyY;
     keySprite.active = 1;
+    hasKey = 0;
+    playerPassedExitCheck = 0;
 }
 
 int main(int argc, char* argv[])
 {
+    // Seed the random number generator
+    srand(time(NULL));
+
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
     glutInitWindowSize(1024, 512);
