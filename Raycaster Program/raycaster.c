@@ -2,9 +2,7 @@
 #include <stdlib.h>
 #include <GL/glut.h>
 #include <math.h>
-#include <time.h> 
-// NOTE: This program requires the following PPM files to be present 
-// in a 'Textures' subdirectory relative to the executable:
+#include <time.h>
 #include "Textures/T_1.ppm"
 #include "Textures/T_2.ppm"
 #include "Textures/T_3.ppm"
@@ -12,13 +10,12 @@
 #include "Textures/start.ppm"
 #include "Textures/win.ppm"
 #include "Textures/intro.ppm"
-#include "Textures/key.ppm"
 
 #define PI 3.1415926535
 #define P2 PI/2
 #define P3 3*PI/2
-#define DR 0.0174533 // Degree to radian conversion factor
-#define MAX_KEYS 5 // Maximum number of keys we can require/place
+#define DR 0.0174533 // Degree to radian conversion
+#define MAX_KEYS 5 // Maximum number of keys
 
 // Player state variables
 float px, py, pdx, pdy, pa;
@@ -43,7 +40,7 @@ typedef struct {
 
 Sprite keySprites[MAX_KEYS];
 
-// --- MATH HELPERS ---
+// --- MATH ---
 
 float degToRad(float a) { return a*PI/180.0; }
 float FixAng(float a) { if(a>2*PI){ a-=2*PI;} if(a<0){ a+=2*PI;} return a; } // Fixed to use 2*PI for radians
@@ -53,7 +50,6 @@ float dist(float ax, float ay, float bx, float by)
     return sqrtf((bx-ax)*(bx-ax) + (by-ay)*(by-ay));
 }
 
-// Helper macro for checking white pixels (used for screen texture transparency)
 #define CHECK_WHITE_PIXEL(r, g, b) (r == 255 && g == 255 && b == 255)
 
 // --- SCREEN RENDERING (2D) ---
@@ -145,7 +141,7 @@ void drawWinScreen()
     }
 }
 
-// MAP & COLLISION
+// --- MAP & COLLISION ---
 
 int mapX=16, mapY=16, mapS=64; // Map size and cell size
 int map[]=
@@ -164,7 +160,7 @@ int map[]=
     1,0,1,0,1,0,0,0,0,1,0,0,0,1,0,1,
     1,0,1,0,0,0,0,0,0,1,0,1,1,1,0,1,
     1,1,1,0,1,1,1,0,1,1,0,0,0,1,0,1,
-    1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,4, // Exit door
+    1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,4,
     1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
 };
 
@@ -208,22 +204,18 @@ int mapCeiling[]= // Ceiling texture index
     3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,
 };
 
-/**
- * Finds a random cell on the map that is walkable (map value 0)
- * and returns the center coordinates for key placement.
- */
+// Function to spawn keys
 void findRandomEmptySpot(float *outX, float *outY) {
     int rx, ry, mp;
     int found = 0;
     while (!found) {
-        // Generate random coordinates within the map bounds (1 to mapX-2, 1 to mapY-2)
+        // Generate random map coordinates
         rx = (rand() % (mapX - 2)) + 1;
         ry = (rand() % (mapY - 2)) + 1;
         
         mp = ry * mapX + rx;
         
-        // Check if the cell is walkable (value 0) and not the player's starting spot (1,1)
-        // Also ensure it's not the exit door (4) area
+        // Check if the cell is walkable (value 0)
         if (map[mp] == 0 && !(rx == 1 && ry == 1)) {
             *outX = rx * mapS + mapS / 2.0f;
             *outY = ry * mapS + mapS / 2.0f;
@@ -254,10 +246,10 @@ int checkCollision(float x, float y)
         }
     }
 
-    return 0; // Open space (0)
+    return 0;
 }
 
-// --- HUD & MINIMAP ---
+// --- HUD ---
 
 void drawText(char *string, int x, int y, float r, float g, float b)
 {
@@ -268,76 +260,6 @@ void drawText(char *string, int x, int y, float r, float g, float b)
     }
 }
 
-void drawMinimap()
-{
-    int xo, yo, i; // Added i for the key loop
-    int minimapScale = 4;
-    
-    // Draw map tiles
-    for(yo=0; yo<mapY; yo++)
-    {
-        for(xo=0; xo<mapX; xo++)
-        {
-            int mp = yo * mapX + xo;
-            if(map[mp] == 1) {
-                glColor3f(1, 1, 1); // Wall: White
-            } else if(map[mp] == 4) {
-                // Door color based on key status
-                if(keysCollected >= keysRequired) {
-                    glColor3f(0.0f, 1.0f, 0.0f); // Unlocked: Green
-                } else {
-                    glColor3f(1.0f, 0.0f, 0.0f); // Locked: Red
-                }
-            } else {
-                glColor3f(0, 0, 0); // Open space: Black
-            }
-            
-            glBegin(GL_QUADS);
-            glVertex2i(xo * minimapScale, yo * minimapScale);
-            glVertex2i((xo + 1) * minimapScale, yo * minimapScale);
-            glVertex2i((xo + 1) * minimapScale, (yo + 1) * minimapScale);
-            glVertex2i(xo * minimapScale, (yo + 1) * minimapScale);
-            glEnd();
-        }
-    }
-    
-    // Draw all active key sprites
-    for(i = 0; i < keysRequired; i++)
-    {
-        if(keySprites[i].active)
-        {
-            // Calculate key position in minimap coordinates
-            int keyMinimapX = (int)(keySprites[i].x * minimapScale) / mapS;
-            int keyMinimapY = (int)(keySprites[i].y * minimapScale) / mapS;
-            
-            glColor3f(1, 0.84, 0); // Gold color for the key
-            glPointSize(6);
-            glBegin(GL_POINTS);
-            glVertex2i(keyMinimapX, keyMinimapY);
-            glEnd();
-        }
-    }
-    
-    // Draw player position and direction
-    {
-        int playerMinimapX = (int)(px * minimapScale) / mapS;
-        int playerMinimapY = (int)(py * minimapScale) / mapS;
-        
-        glColor3f(1, 0, 0);
-        glPointSize(4);
-        glBegin(GL_POINTS);
-        glVertex2i(playerMinimapX, playerMinimapY);
-        glEnd();
-        
-        glColor3f(1, 0, 0);
-        glLineWidth(1);
-        glBegin(GL_LINES);
-        glVertex2i(playerMinimapX, playerMinimapY);
-        glVertex2i(playerMinimapX + (int)(pdx * minimapScale / 5), 
-                   playerMinimapY + (int)(pdy * minimapScale / 5));
-        glEnd();
-    }
-}
 
 // --- RAYCASTING & RENDERING ---
 void drawRays3D()
@@ -434,13 +356,13 @@ void drawRays3D()
                     vx = rx; vy = ry; disV = dist(px,py,vx,vy);
                     vMapValue = map[mp]; // Store map value
                     dof = 8; 
-                } else { 
+                } else { // Ray passes through open space
                     rx += xo; ry += yo; dof++; 
                 }
-            } else { rx += xo; ry += yo; dof++; } 
+            } else { rx += xo; ry += yo; dof++; } // Out of map bounds
         }
 
-        // Fish-eye Correction
+        // --- Final Distance Selection & Fish-eye Correction ---
         if(disV < disH) { rx = vx; ry = vy; disT = disV; wallType = vMapValue; shade = 1.0f; }
         else { rx = hx; ry = hy; disT = disH; wallType = hMapValue; shade = 0.7f; }
 
@@ -641,7 +563,6 @@ void drawSprite(Sprite *s, const unsigned char *tex, int texWidth, int texHeight
     spriteWidth = spriteHeight; // Keep aspect ratio
     
     // Calculate screen X position
-    // (spriteAngle / (DR * 0.5f) is the ray index, multiply by 8 for screen X)
     spriteScreenX = (int)(512 + (spriteAngle / (DR * 0.5f) * 8)); 
     
     // Calculate screen boundaries
@@ -656,17 +577,17 @@ void drawSprite(Sprite *s, const unsigned char *tex, int texWidth, int texHeight
     if(startY < 0) startY = 0;
     if(endY > 512) endY = 512;
     
-    // Draw the key sprite (using procedurally drawn shape for simplicity)
+    // Draw the key sprite
     for(x = startX; x < endX; x++)
     {
         if(x < 0 || x >= 1024) continue;
         
-        // Depth check: Only draw the sprite if it is closer than the wall behind it
+        // Depth check
         if(spriteDist >= depthBuffer[x]) continue;
         
         for(y = startY; y < endY; y++)
         {
-            // Normalize coordinates to 0-1 range relative to the sprite bounds
+            // Normalize coordinates
             float nx = (float)(x - startX) / spriteWidth;
             float ny = (float)(y - startY) / spriteHeight;
             
@@ -693,7 +614,7 @@ void drawSprite(Sprite *s, const unsigned char *tex, int texWidth, int texHeight
             
             if(drawPixel)
             {
-                // Gold color for the key
+                // Color for the key
                 glColor3f(1.0f, 0.84f, 0.0f);
                 glPointSize(1);
                 glBegin(GL_POINTS);
@@ -704,7 +625,7 @@ void drawSprite(Sprite *s, const unsigned char *tex, int texWidth, int texHeight
     }
 }
 
-// --- GAME LOGIC ---
+// --- LOGIC ---
 
 void updateMovement()
 {
@@ -712,7 +633,7 @@ void updateMovement()
     float rotSpeed = 0.05f;
     float newX, newY;
     int moved = 0;
-    int i; // Declared i here for C89 compliance
+    int i;
     
     // Only update movement if the game is actively running 
     if(!gameStarted || gameWon || gameIntro) return;
@@ -720,7 +641,7 @@ void updateMovement()
     newX = px;
     newY = py;
 
-    // Rotation (A/D)
+    // Rotation
     if(keyStates['a']) {
         pa -= rotSpeed;
         if(pa < 0) { pa += 2*PI; }
@@ -736,7 +657,7 @@ void updateMovement()
         moved = 1;
     }
 
-    // Forward/Backward Movement (W/S)
+    // Forward/Backward Movement
     if(keyStates['w']) {
         newX += cosf(pa) * walkSpeed;
         newY += sinf(pa) * walkSpeed;
@@ -772,7 +693,7 @@ void updateMovement()
     // Check if the player passed the exit check after moving
     if(playerPassedExitCheck)
     {
-        gameWon = 1; // Immediately transition to win screen
+        gameWon = 1; // Win screen
     }
     
     if(moved || gameWon) {
@@ -782,7 +703,7 @@ void updateMovement()
 
 void display()
 {
-    int i; // Declared i here for C89 compliance
+    int i;
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
     if(gameWon)
@@ -797,9 +718,9 @@ void display()
     {
         drawIntroScreen();
     }
-    else // Main game loop (Maze + Minimap + Keys)
+    else // (Maze + Keys)
     {
-        // Draw the background color for the game area
+        // Background Color
         glColor3f(0.2f, 0.2f, 0.2f);
         glBegin(GL_QUADS);
         glVertex2i(0, 0);
@@ -810,27 +731,24 @@ void display()
         
         drawRays3D();
         
-        // Draw all active key sprites
+        // Draw key sprites
         for(i = 0; i < keysRequired; i++)
         {
             // Using NULL as texture argument since sprite is drawn procedurally
             drawSprite(&keySprites[i], NULL, 32, 32); 
         }
         
-        drawMinimap();
 
-        // Draw HUD: Key count and instructions
+        // Draw HUD
         char hudText[50];
-        /* The snprintf function is C99. Using sprintf as a C89 alternative, 
-           but be cautious of buffer overflow in real world code. */
         sprintf(hudText, "Keys: %d / %d", keysCollected, keysRequired);
-        drawText(hudText, 10, 500, 1.0f, 1.0f, 0.0f); // Yellow text (Keys collected/required)
+        drawText(hudText, 10, 500, 1.0f, 1.0f, 0.0f); // (Keys collected/required)
         
-        // Door Status message
+        // Door Status
         if (keysCollected < keysRequired) {
-            drawText("FIND THE KEYS TO ESCAPE (W, A, S, D)", 150, 500, 1.0f, 0.0f, 0.0f); // Red (Locked)
+            drawText("FIND THE KEYS TO ESCAPE (W, A, S, D)", 150, 500, 1.0f, 0.0f, 0.0f); // (Locked)
         } else {
-            drawText("EXIT IS OPEN!", 150, 500, 0.0f, 1.0f, 0.0f); // Green (Unlocked)
+            drawText("EXIT IS OPEN!", 150, 500, 0.0f, 1.0f, 0.0f); // (Unlocked)
         }
     }
     
@@ -859,7 +777,7 @@ void keyDown(unsigned char key, int x, int y)
         pdy = sinf(pa) * 5.0f;
         
         // Re-initialize key states randomly
-        keysRequired = (rand() % MAX_KEYS) + 1; // 1 to 5 keys required
+        keysRequired = (rand() % MAX_KEYS) + 1; // Keys required
 
         for(i = 0; i < keysRequired; i++)
         {
@@ -879,14 +797,14 @@ void keyDown(unsigned char key, int x, int y)
     
     if(!gameStarted)
     {
-        // Start Screen -> Intro Screen
+        // Start Screen > Intro Screen
         gameStarted = 1;
         gameIntro = 1; // Set intro state active
         glutPostRedisplay();
     }
     else if(gameIntro)
     {
-        // Intro Screen -> Game
+        // Intro Screen > Game
         gameIntro = 0; // Set intro state inactive, entering main game loop
         glutPostRedisplay();
     }
@@ -920,7 +838,7 @@ void resize(int w, int h)
 void init()
 {
     float keyX, keyY;
-    int i; // Declared i here for C89 compliance
+    int i; 
     
     glClearColor(0.3f, 0.3f, 0.3f, 0);
     // Initial ortho setup, will be called again by resize
@@ -955,14 +873,14 @@ void init()
 
 int main(int argc, char* argv[])
 {
-    // Seed the random number generator
+    // Random number generator
     srand(time(NULL));
 
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
     glutInitWindowSize(1024, 512);
     
-    // Center the window on the screen
+    // Window Dimensions
     int screenWidth = glutGet(GLUT_SCREEN_WIDTH);
     int screenHeight = glutGet(GLUT_SCREEN_HEIGHT);
     int windowX = (screenWidth - 1024) / 2;
@@ -982,4 +900,3 @@ int main(int argc, char* argv[])
     glutMainLoop();
     return 0;
 }
-
